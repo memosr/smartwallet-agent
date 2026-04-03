@@ -1,9 +1,14 @@
-import { Redis } from "@upstash/redis";
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL!;
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN!;
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+async function redisCommand(command: string[]): Promise<unknown> {
+  const res = await fetch(`${REDIS_URL}/${command.map(encodeURIComponent).join("/")}`, {
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+    cache: "no-store",
+  });
+  const data = await res.json();
+  return data.result;
+}
 
 export interface Transaction {
   id: string;
@@ -21,21 +26,21 @@ export interface Transaction {
 function getWeekKey(): string {
   const now = new Date();
   const day = now.getDay();
-  const diff = now.getDate() - day;
-  const start = new Date(now.setDate(diff));
+  const start = new Date(now);
+  start.setDate(now.getDate() - day);
   start.setHours(0, 0, 0, 0);
   return `week:${start.getTime()}`;
 }
 
 export async function getWeeklyTotal(): Promise<number> {
-  const val = await redis.get<number>(getWeekKey());
-  return val ?? 0;
+  const val = await redisCommand(["GET", getWeekKey()]);
+  return val ? parseFloat(val as string) : 0;
 }
 
 export async function addToWeeklyTotal(amount: number): Promise<void> {
   const key = getWeekKey();
-  await redis.incrbyfloat(key, amount);
-  await redis.expire(key, 60 * 60 * 24 * 7);
+  await redisCommand(["INCRBYFLOAT", key, amount.toString()]);
+  await redisCommand(["EXPIRE", key, "604800"]);
 }
 
 export async function wouldExceedLimit(amount: number): Promise<boolean> {
@@ -45,15 +50,14 @@ export async function wouldExceedLimit(amount: number): Promise<boolean> {
 }
 
 export async function addTransaction(tx: Transaction): Promise<void> {
-  await redis.lpush("transactions", JSON.stringify(tx));
-  await redis.ltrim("transactions", 0, 49);
+  await redisCommand(["LPUSH", "transactions", JSON.stringify(tx)]);
+  await redisCommand(["LTRIM", "transactions", "0", "49"]);
 }
 
 export async function getTransactions(): Promise<Transaction[]> {
-  const items = await redis.lrange<string>("transactions", 0, 49);
-  return items.map((item) =>
-    typeof item === "string" ? JSON.parse(item) : item
-  );
+  const items = await redisCommand(["LRANGE", "transactions", "0", "49"]) as string[];
+  if (!items || !Array.isArray(items)) return [];
+  return items.map((item) => typeof item === "string" ? JSON.parse(item) : item);
 }
 
 export function generateId(): string {
