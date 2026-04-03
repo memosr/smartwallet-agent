@@ -1,9 +1,14 @@
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL!;
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN!;
 
-async function redisCommand(command: string[]): Promise<unknown> {
-  const res = await fetch(`${REDIS_URL}/${command.map(encodeURIComponent).join("/")}`, {
-    headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+async function redisCommand(command: unknown[]): Promise<unknown> {
+  const res = await fetch(REDIS_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${REDIS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(command),
     cache: "no-store",
   });
   const data = await res.json();
